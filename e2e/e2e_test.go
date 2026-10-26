@@ -56,12 +56,13 @@ func newWorld(t *testing.T) *world {
 		k, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(k, "GIT_") || strings.HasPrefix(k, "CLAUDE") || strings.HasPrefix(k, "CODEX") ||
 			strings.HasPrefix(k, "PI_") || strings.HasPrefix(k, "OPENCODE") || strings.HasPrefix(k, "DSH_") ||
-			k == "HOME" || k == "XDG_CONFIG_HOME" || k == "XDG_CACHE_HOME" || k == "PATH" {
+			k == "HOME" || k == "XDG_CONFIG_HOME" || k == "XDG_CACHE_HOME" || k == "PATH" ||
+			k == "LANG" || k == "LC_ALL" || k == "LC_MESSAGES" {
 			continue
 		}
 		w.env = append(w.env, kv)
 	}
-	w.env = append(w.env, "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
+	w.env = append(w.env, "LANG=en_US.UTF-8", "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
 		"XDG_CACHE_HOME="+filepath.Join(home, ".cache"), "CODEX_HOME="+filepath.Join(home, ".codex"),
 		"GIT_CONFIG_GLOBAL="+filepath.Join(home, ".gitconfig"), "GIT_CONFIG_NOSYSTEM=1",
 		"PATH="+binDir+":"+os.Getenv("PATH"))
@@ -417,7 +418,7 @@ func TestEditor(t *testing.T) {
 // A message that already ends in trailers keeps them all as trailers.
 func TestExistingTrailers(t *testing.T) {
 	w := newWorld(t)
-	w.tab("install")
+	w.tab("install", "--template", "standard")
 	w.assistant("S1", w.repo, time.Now().Add(-time.Minute), cc{id: "m1", req: "r1", in: 10000, out: 1000}, 1)
 	w.commit(nil, "-m", "fix: thing\n\nWhy it broke.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nSigned-off-by: Test <test@example.com>")
 	tr := w.trailers("HEAD")

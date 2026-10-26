@@ -22,6 +22,8 @@ type Entry struct {
 	Time    time.Time
 	Subject string
 	Cost    float64
+	Paid    float64 // what a plan made it cost, or Cost without one
+	Planned bool
 	Priced  bool
 	Models  []Share
 	Agents  []string
@@ -56,7 +58,7 @@ var (
 // Load reads the receipts of the commits revs name (HEAD's history when
 // none are given).
 func Load(dir string, revs []string) (*History, error) {
-	format := "--format=%H%x1f%ct%x1f%s%x1f%(trailers:key=AI-Cost,key=AI-Tokens,key=AI-Model,key=AI-Agent,key=AI-Turns,unfold,separator=%x1d)%x1e"
+	format := "--format=%H%x1f%ct%x1f%s%x1f%(trailers:key=AI-Cost,key=AI-Cost-Paid,key=AI-Tokens,key=AI-Model,key=AI-Agent,key=AI-Turns,unfold,separator=%x1d)%x1e"
 	args := append([]string{"log", format}, revs...)
 	if len(revs) == 0 {
 		args = append(args, "HEAD")
@@ -103,11 +105,21 @@ func parse(f []string) (Entry, bool) {
 				e.Priced = true
 			}
 			for _, p := range parts[1:] {
-				if m := turnsRe.FindStringSubmatch(p); m != nil {
+				if paid, ok := strings.CutPrefix(p, "paid "); ok {
+					if m := costRe.FindStringSubmatch(paid); m != nil {
+						e.Paid, _ = strconv.ParseFloat(m[1], 64)
+						e.Planned = true
+					}
+				} else if m := turnsRe.FindStringSubmatch(p); m != nil {
 					e.Turns, _ = strconv.Atoi(m[1])
 				} else if len(e.Models) == 0 {
 					e.Models = []Share{{Model: extraRe.ReplaceAllString(p, ""), Cost: math.NaN()}}
 				}
+			}
+		case "AI-Cost-Paid":
+			if m := costRe.FindStringSubmatch(v); m != nil {
+				e.Paid, _ = strconv.ParseFloat(m[1], 64)
+				e.Planned = true
 			}
 		case "AI-Tokens":
 			for _, m := range tokenRe.FindAllStringSubmatch(v, -1) {
@@ -144,6 +156,9 @@ func parse(f []string) (Entry, bool) {
 			e.Turns, _ = strconv.Atoi(v)
 		}
 	}
+	if !e.Planned {
+		e.Paid = e.Cost
+	}
 	if found && len(e.Agents) == 0 {
 		e.Agents = []string{"(not recorded)"}
 	}
@@ -173,6 +188,8 @@ func tokens(num, unit string) int64 {
 // Totals are a history's sums.
 type Totals struct {
 	Cost                     float64
+	Paid                     float64
+	Planned                  bool // some receipt carries a plan's price
 	In, Cached, Written, Out int64
 	Turns                    int
 	ByModel, ByAgent, ByMon  []Share
@@ -185,6 +202,8 @@ func (h *History) Totals() Totals {
 	models, agents, months := map[string]float64{}, map[string]float64{}, map[string]float64{}
 	for _, e := range h.Entries {
 		t.Cost += e.Cost
+		t.Paid += e.Paid
+		t.Planned = t.Planned || e.Planned
 		t.In += e.In
 		t.Cached += e.Cached
 		t.Written += e.Written
@@ -254,6 +273,9 @@ func Summary(h *History) string {
 	fmt.Fprintf(&b, "  %d of %d commits carry a receipt · %s → %s\n\n", len(h.Entries), h.Commits,
 		t.First.Local().Format("2006-01-02"), t.Last.Local().Format("2006-01-02"))
 	fmt.Fprintf(&b, "  %-18s %10s  (USD at API prices)\n", "total", render.USD(t.Cost))
+	if t.Planned {
+		fmt.Fprintf(&b, "  %-18s %10s  (what your plans made it cost)\n", "you paid", render.USD(t.Paid))
+	}
 	if t.In+t.Out > 0 { // minimal receipts carry no token counts
 		fmt.Fprintf(&b, "  %-18s in %s · cached %s · written %s · out %s\n", "tokens",
 			render.Tokens(t.In), render.Tokens(t.Cached), render.Tokens(t.Written), render.Tokens(t.Out))
@@ -319,6 +341,9 @@ func Receipt(h *History, snacks []render.Snack) string {
 		l = append(l, render.Center("(nothing on the tab yet)"))
 	}
 	l = append(l, strings.Repeat("- ", 17), render.Item("TOTAL", render.USD(t.Cost)))
+	if t.Planned {
+		l = append(l, render.Item("YOU PAID", render.USD(t.Paid)))
+	}
 	counts := plural(len(h.Entries), "commit")
 	if t.Turns > 0 {
 		counts += " · " + plural(t.Turns, "turn")

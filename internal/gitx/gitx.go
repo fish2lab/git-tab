@@ -74,7 +74,7 @@ func (r *Repo) Linked() bool {
 
 // Config is every tab.* setting (lower-cased keys) and core.commentChar.
 func (r *Repo) Config() map[string]string {
-	out, _ := Run(r.Top, "config", "--get-regexp", `^(tab\.|core\.commentchar$)`)
+	out, _ := Run(r.Top, "config", "--get-regexp", `^(tab\.|tab-plan\.|core\.commentchar$)`)
 	m := map[string]string{}
 	for _, l := range strings.Split(out, "\n") {
 		if k, v, ok := strings.Cut(l, " "); ok {

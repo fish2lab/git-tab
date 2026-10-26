@@ -4,6 +4,7 @@ package bill
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/fish2lab/git-tab/internal/agents"
@@ -24,12 +25,29 @@ type Bill struct {
 	Lines      []Line    // one per model, most expensive first
 	Agents     []string  // most expensive first
 	Sessions   int
-	Turns      int // messages a person typed
-	Requests   int // model calls
+	SessionIDs []string // agent/short id of each session, sorted
+	Turns      int      // messages a person typed
+	Requests   int      // model calls
 	Busy       time.Duration
 	Usage      agents.Usage
 	Cost       float64 // of the priced lines
 	Unpriced   []string
+	// Paid is what the priced lines cost under the person's plans, a call
+	// no plan covers counting at its API price. Planned says whether any
+	// plan covered a call; Paid means nothing otherwise.
+	Paid    float64
+	Planned bool
+}
+
+// ShortID is the part of a session id a receipt names it by: its last 8
+// characters, which are random in the UUIDs and ids agents use (the first
+// ones of a time-ordered id are its start time).
+func ShortID(id string) string {
+	id = strings.ReplaceAll(id, "-", "")
+	if len(id) > 8 {
+		id = id[len(id)-8:]
+	}
+	return id
 }
 
 func (b *Bill) Empty() bool { return b == nil || b.Requests == 0 }
@@ -39,12 +57,17 @@ type Pricer interface {
 	Cost(e agents.Event) (float64, bool)
 }
 
+// Rater is the share of a request's API price a person's plan pays.
+type Rater interface {
+	Share(e agents.Event) (float64, bool)
+}
+
 // idle is the longest gap between two events of a thread that still counts
 // as the agent being busy.
 const idle = 5 * time.Minute
 
-// Build sums events, which must already be the commit's.
-func Build(events []agents.Event, p Pricer, end time.Time) *Bill {
+// Build sums events, which must already be the commit's. r may be nil.
+func Build(events []agents.Event, p Pricer, r Rater, end time.Time) *Bill {
 	b := &Bill{End: end}
 	lines := map[string]*Line{}
 	agentCost := map[string]float64{}
@@ -72,6 +95,13 @@ func Build(events []agents.Event, p Pricer, end time.Time) *Bill {
 		if c, ok := p.Cost(e); ok {
 			l.Cost += c
 			agentCost[e.Agent] += c
+			share := 1.0
+			if r != nil {
+				if v, ok := r.Share(e); ok {
+					share, b.Planned = v, true
+				}
+			}
+			b.Paid += c * share
 		} else {
 			l.Priced = false
 			if _, ok := agentCost[e.Agent]; !ok {
@@ -104,6 +134,11 @@ func Build(events []agents.Event, p Pricer, end time.Time) *Bill {
 		return b.Agents[i] < b.Agents[j]
 	})
 	b.Sessions = len(sessions)
+	for k := range sessions {
+		agent, id, _ := strings.Cut(k, ":")
+		b.SessionIDs = append(b.SessionIDs, agent+"/"+ShortID(id))
+	}
+	sort.Strings(b.SessionIDs)
 	for _, ts := range threads {
 		sort.Slice(ts, func(i, j int) bool { return ts[i].Before(ts[j]) })
 		for i := 1; i < len(ts); i++ {

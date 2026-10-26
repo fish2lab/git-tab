@@ -83,11 +83,27 @@ type Commit struct {
 	Cost    float64   `json:"cost"`
 }
 
+// Tab is what the receipts in a commit's history add up to, kept so that
+// the next receipt's running tab costs no walk of the history.
+type Tab struct {
+	Head    string  `json:"head"`
+	Commits int     `json:"commits"` // with a receipt
+	Cost    float64 `json:"cost"`
+	Paid    float64 `json:"paid"`
+	Planned bool    `json:"planned,omitempty"` // some receipt carries a plan's price
+}
+
+// Add is t with one more receipt on it, made by commit head.
+func (t *Tab) Add(head string, cost, paid float64, planned bool) *Tab {
+	return &Tab{Head: head, Commits: t.Commits + 1, Cost: t.Cost + cost, Paid: t.Paid + paid, Planned: t.Planned || planned}
+}
+
 type Ledger struct {
 	Version int               `json:"version"`
 	State   State             `json:"state"`
 	Last    string            `json:"last,omitempty"` // the commit that last changed State
 	Commits map[string]Commit `json:"commits,omitempty"`
+	Tab     *Tab              `json:"tab,omitempty"`
 	path    string
 	fresh   bool
 }
@@ -185,6 +201,9 @@ type Pending struct {
 	End      time.Time `json:"end"`
 	Threads  []string  `json:"threads,omitempty"`
 	Cost     float64   `json:"cost"`
+	Paid     float64   `json:"paid"`
+	Planned  bool      `json:"planned,omitempty"`
+	Tab      *Tab      `json:"tab,omitempty"` // the history's receipts before this one
 	Written  time.Time `json:"written"`
 }
 

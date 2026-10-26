@@ -33,9 +33,10 @@ const usage = `git tab — a receipt for every commit an AI helped write
   git tab receipt [<revs>]                    the same, printed as a receipt
   git tab badge [--svg FILE] [<revs>]         a "built with $N of AI" README badge
   git tab prices update | show <model>...     refresh or look up API prices (models.dev)
+  git tab plan [add|rm|measure]               what you actually pay: subscriptions and discounted keys
   git tab doctor                              what git-tab sees and did last
 
-Templates (git config tab.template): minimal, standard, receipt, fun.
+Templates (git config tab.template): receipt (default), standard, minimal, fun.
 Settings: tab.enabled, tab.snacks, tab.scope (auto|repo), tab.lookback, tab.timeout, tab.autoUpdatePrices.
 `
 
@@ -62,6 +63,8 @@ func Run(args []string) int {
 		return badgeCmd(rest)
 	case "prices":
 		return pricesCmd(rest)
+	case "plan", "plans":
+		return planCmd(rest)
 	case "doctor":
 		return doctorCmd()
 	case "version", "--version", "-v":

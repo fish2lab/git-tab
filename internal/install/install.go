@@ -13,11 +13,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/fish2lab/git-tab/internal/gitx"
 	"github.com/fish2lab/git-tab/internal/ledger"
 	"github.com/fish2lab/git-tab/internal/price"
+	"github.com/fish2lab/git-tab/internal/render"
 )
 
 var Events = []string{"prepare-commit-msg", "commit-msg", "post-commit"}
@@ -132,6 +134,11 @@ func Install(o Options) ([]string, error) {
 		}
 		did = append(did, fmt.Sprintf("hook files %s in %s → %s", strings.Join(Events, ", "), dir, bin))
 	}
+	if _, err := gitx.Run(o.Dir, "config", "tab.snacks"); err != nil && chinese() {
+		if _, err := gitx.Run(o.Dir, "config", scope, "tab.snacks", render.ChineseSnacks); err == nil {
+			did = append(did, fmt.Sprintf("tab.snacks = %s (%s)", render.ChineseSnacks, strings.TrimPrefix(scope, "--")))
+		}
+	}
 	if o.Template != "" {
 		if _, err := gitx.Run(o.Dir, "config", scope, "tab.template", o.Template); err != nil {
 			return did, err
@@ -139,6 +146,36 @@ func Install(o Options) ([]string, error) {
 		did = append(did, fmt.Sprintf("tab.template = %s (%s)", o.Template, strings.TrimPrefix(scope, "--")))
 	}
 	return did, nil
+}
+
+// chinese says the person's locale is Chinese, by language or by region,
+// so that receipts count money in 煎饼果子.
+func chinese() bool {
+	var locales []string
+	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if v := os.Getenv(k); v != "" && v != "C" && v != "POSIX" {
+			locales = append(locales, v)
+		}
+	}
+	// macOS terminals often set no locale; the system settings have one.
+	if len(locales) == 0 && runtime.GOOS == "darwin" {
+		if out, err := exec.Command("defaults", "read", "-g", "AppleLocale").Output(); err == nil {
+			locales = append(locales, strings.TrimSpace(string(out)))
+		}
+	}
+	for _, l := range locales {
+		l, _, _ = strings.Cut(l, ".")
+		lang, region, _ := strings.Cut(strings.ReplaceAll(l, "-", "_"), "_")
+		if strings.EqualFold(lang, "zh") {
+			return true
+		}
+		for _, r := range []string{"CN", "TW", "HK", "MO", "SG"} {
+			if strings.EqualFold(region, r) || strings.HasSuffix(strings.ToUpper(region), "_"+r) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hooksDir(repo *gitx.Repo) (string, error) {

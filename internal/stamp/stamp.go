@@ -27,8 +27,10 @@ import (
 	"github.com/fish2lab/git-tab/internal/bill"
 	"github.com/fish2lab/git-tab/internal/gitx"
 	"github.com/fish2lab/git-tab/internal/ledger"
+	"github.com/fish2lab/git-tab/internal/plan"
 	"github.com/fish2lab/git-tab/internal/price"
 	"github.com/fish2lab/git-tab/internal/render"
+	"github.com/fish2lab/git-tab/internal/report"
 )
 
 // Settings are a repository's tab.* config.
@@ -41,10 +43,11 @@ type Settings struct {
 	RepoScope   bool // ignore the committing agent's session; settle everyone's
 	AutoPrices  bool
 	CommentChar string
+	Plans       *plan.Book // what the person pays, from tab-plan.* config
 }
 
 func settings(cfg map[string]string) Settings {
-	s := Settings{Enabled: true, Template: render.Standard, Timeout: 4 * time.Second, Lookback: 30 * 24 * time.Hour,
+	s := Settings{Enabled: true, Template: render.Receipt, Timeout: 4 * time.Second, Lookback: 30 * 24 * time.Hour,
 		AutoPrices: true, CommentChar: "#"}
 	if v, ok := cfg["tab.enabled"]; ok && isFalse(v) {
 		s.Enabled = false
@@ -75,6 +78,7 @@ func settings(cfg map[string]string) Settings {
 	if v := cfg["core.commentchar"]; v != "" && v != "auto" {
 		s.CommentChar = v
 	}
+	s.Plans = plan.FromConfig(cfg)
 	return s
 }
 
@@ -153,6 +157,11 @@ type Window struct {
 	Floor time.Time // nothing older counts, whatever the ledger says
 	End   time.Time
 	Scope *Scope
+	// Foreign are the sessions that commits stamped elsewhere (another
+	// machine, a cloud container) name, each with the time of the latest
+	// such commit: a session whose log was copied here, by a handoff or a
+	// teleport, is already settled up to then.
+	Foreign map[string]time.Time
 }
 
 // key names what the ledger settles separately: a thread, so that a
@@ -184,6 +193,9 @@ func Collect(top string, w Window) ([]agents.Event, []string, []error) {
 			start = w.Floor
 		}
 		if !e.Time.After(start) || e.Time.After(w.End) || !cwds.match(e.Cwd) {
+			return
+		}
+		if t, ok := w.Foreign[e.Agent+"/"+bill.ShortID(e.Session)]; ok && !e.Time.After(t) {
 			return
 		}
 		events = append(events, e)
@@ -478,8 +490,18 @@ func (h *hook) stamp(p *ledger.Pending, msg string) (string, bool) {
 		h.logf("no agent usage since %s", w.State.Earliest().Format(time.RFC3339))
 		return msg, false
 	}
-	art, trailers := render.Render(b, h.s.Template, h.s.Snacks)
+	o := render.Options{Template: h.s.Template, Snacks: h.s.Snacks}
+	if h.s.Template == render.Receipt {
+		if p.Tab = h.tab(p.Amend); p.Tab != nil {
+			o.Tab = &render.Tab{Commits: p.Tab.Commits, Cost: p.Tab.Cost, Paid: p.Tab.Paid, Planned: p.Tab.Planned}
+		}
+	}
+	art, trailers := render.Render(b, o)
 	p.Before, p.End, p.Cost, p.Stamped = w.State, w.End, b.Cost, true
+	p.Paid, p.Planned = b.Paid, b.Planned
+	if !b.Planned {
+		p.Paid = b.Cost
+	}
 	// Work trees share the ledger, and a commit in one sees none of the
 	// usage in the others: it settles only the threads it billed.
 	if w.Scope != nil || h.repo.Linked() {
@@ -515,13 +537,73 @@ func (h *hook) bill(amend bool, scope *Scope) (*bill.Bill, Window, []string, err
 			w.State.Base = t
 		}
 	}
+	w.Foreign = h.foreign(l, w.Floor)
 	events, threads, errs := Collect(h.repo.Top, w)
 	for _, e := range errs {
 		h.logf("%v", e)
 	}
 	cat := price.Load()
-	h.logf("%d events, prices %s %s", len(events), cat.From, cat.Fetched.Format("2006-01-02"))
-	return bill.Build(events, cat, now), w, threads, nil
+	h.logf("%d events, prices %s %s, %d plans", len(events), cat.From, cat.Fetched.Format("2006-01-02"), len(h.s.Plans.Plans))
+	return bill.Build(events, cat, h.s.Plans, now), w, threads, nil
+}
+
+// foreign reads the sessions named by the commits since floor that this
+// ledger did not stamp. A commit's author time is when its receipt was
+// cut: a rebase keeps it.
+func (h *hook) foreign(l *ledger.Ledger, floor time.Time) map[string]time.Time {
+	if h.repo.Head == "" {
+		return nil
+	}
+	out, err := gitx.Run(h.repo.Top, "log", "--since="+strconv.FormatInt(floor.Unix(), 10),
+		"--format=%H%x1f%at%x1f%(trailers:key=AI-Session,valueonly,unfold,separator=%x2c)%x1e", "HEAD")
+	if err != nil {
+		return nil
+	}
+	m := map[string]time.Time{}
+	for _, rec := range strings.Split(out, "\x1e") {
+		f := strings.Split(strings.TrimSpace(rec), "\x1f")
+		if len(f) < 3 || f[2] == "" {
+			continue
+		}
+		if _, ours := l.Commits[f[0]]; ours {
+			continue
+		}
+		sec, _ := strconv.ParseInt(f[1], 10, 64)
+		t := time.Unix(sec, 0)
+		for _, s := range strings.Split(f[2], ",") {
+			if s = strings.TrimSpace(s); s != "" && t.After(m[s]) {
+				m[s] = t
+			}
+		}
+	}
+	if len(m) > 0 {
+		h.logf("sessions stamped elsewhere: %d", len(m))
+	}
+	return m
+}
+
+// tab is what the receipts before the commit being made add up to: those
+// in HEAD's history, or for an amend, in the history of HEAD's parents.
+func (h *hook) tab(amend bool) *ledger.Tab {
+	revs := []string{h.repo.Head}
+	if revs[0] == "" {
+		return nil
+	}
+	if amend {
+		if revs = h.repo.Parents(h.repo.Head); len(revs) == 0 {
+			return nil
+		}
+	}
+	if l, err := ledger.Open(h.repo.CommonDir); err == nil && l.Tab != nil && len(revs) == 1 && l.Tab.Head == revs[0] {
+		return l.Tab
+	}
+	hist, err := report.Load(h.repo.Top, revs)
+	if err != nil {
+		h.logf("tab: %v", err)
+		return nil
+	}
+	t := hist.Totals()
+	return &ledger.Tab{Head: strings.Join(revs, " "), Commits: len(hist.Entries), Cost: t.Cost, Paid: t.Paid, Planned: t.Planned}
 }
 
 // PostCommit is the post-commit hook: the commit exists, so the usage on
@@ -559,22 +641,31 @@ func PostCommit() {
 	}
 	l.Commits[h.repo.Head] = ledger.Commit{Before: p.Before, End: p.End, Threads: p.Threads, Cost: p.Cost}
 	l.Last = h.repo.Head
+	if p.Tab != nil {
+		l.Tab = p.Tab.Add(h.repo.Head, p.Cost, p.Paid, p.Planned)
+	}
 	if err := l.Save(); err != nil {
 		h.logf("save ledger: %v", err)
 	}
 	h.logf("settled %s up to %s (amend=%v)", short(h.repo.Head), p.End.Format(time.RFC3339), amend)
-	if h.s.AutoPrices {
-		refreshPrices()
+	if h.s.AutoPrices && price.Stale(week) {
+		background(price.CachePath()+".attempt", "prices", "update", "--quiet")
+	}
+	for _, pl := range h.s.Plans.Plans {
+		if pl.Stale(time.Now(), week) {
+			background(filepath.Join(filepath.Dir(price.CachePath()), "plans.attempt"), "plan", "measure", "--quiet")
+			break
+		}
 	}
 }
 
-// refreshPrices updates a week-old price cache in a detached process, at
-// most once an hour, so the hook never waits on the network.
-func refreshPrices() {
-	if !price.Stale(7 * 24 * time.Hour) {
-		return
-	}
-	mark := price.CachePath() + ".attempt"
+const week = 7 * 24 * time.Hour
+
+// background runs git-tab with args in a detached process, at most once an
+// hour per mark file, so the hook never waits on the network or on a
+// month of logs: a week-old price cache is fetched again, and a
+// subscription's measured worth is measured again.
+func background(mark string, args ...string) {
 	if info, err := os.Stat(mark); err == nil && time.Since(info.ModTime()) < time.Hour {
 		return
 	}
@@ -584,7 +675,7 @@ func refreshPrices() {
 	if err != nil {
 		return
 	}
-	cmd := exec.Command(exe, "prices", "update", "--quiet")
+	cmd := exec.Command(exe, args...)
 	detach(cmd)
 	if cmd.Start() == nil {
 		cmd.Process.Release()
@@ -644,7 +735,11 @@ func Next(repoScope bool) (*Preview, error) {
 	}
 	pv := &Preview{Bill: b, Window: w, Settings: h.s, Repo: h.repo}
 	if !b.Empty() {
-		pv.Art, pv.Trailers = render.Render(b, h.s.Template, h.s.Snacks)
+		o := render.Options{Template: h.s.Template, Snacks: h.s.Snacks}
+		if t := h.tab(false); t != nil && h.s.Template == render.Receipt {
+			o.Tab = &render.Tab{Commits: t.Commits, Cost: t.Cost, Paid: t.Paid, Planned: t.Planned}
+		}
+		pv.Art, pv.Trailers = render.Render(b, o)
 	}
 	return pv, nil
 }

@@ -27,7 +27,23 @@ var Templates = []string{Minimal, Standard, Receipt, Fun}
 const Schema = 1
 
 // Keys are the trailers this package writes; Strip removes exactly these.
-var Keys = []string{"AI-Cost", "AI-Tokens", "AI-Model", "AI-Agent", "AI-Turns", "AI-Cost-Equiv", "AI-Cost-Schema"}
+var Keys = []string{"AI-Cost", "AI-Cost-Paid", "AI-Tokens", "AI-Model", "AI-Agent", "AI-Turns", "AI-Session",
+	"AI-Cost-Equiv", "AI-Cost-Schema"}
+
+// Options say how to render a bill.
+type Options struct {
+	Template string
+	Snacks   []Snack
+	Tab      *Tab // the commits before this one, for the receipt's running tab
+}
+
+// Tab is what the receipts already in a branch's history add up to.
+type Tab struct {
+	Commits int
+	Cost    float64
+	Paid    float64
+	Planned bool // some of them carry a paid amount
+}
 
 // Snack is a thing a dollar amount can be counted in.
 type Snack struct {
@@ -35,7 +51,12 @@ type Snack struct {
 	USD  float64
 }
 
-const DefaultSnacks = "杯咖啡=4.5,个煎饼果子=1.4"
+// DefaultSnacks are what a receipt counts money in unless tab.snacks says
+// otherwise; ChineseSnacks are what `git tab install` sets in China.
+const (
+	DefaultSnacks = "coffees=4.5,pizza slices=3.5"
+	ChineseSnacks = "杯咖啡=4.5,个煎饼果子=1.4"
+)
 
 // ParseSnacks reads "name=usd,name=usd".
 func ParseSnacks(s string) []Snack {
@@ -129,8 +150,34 @@ func costValue(b *bill.Bill) string {
 	return USD(b.Cost) + " (api-equiv)"
 }
 
+// paidValue is AI-Cost-Paid: the plan-adjusted amount and its share of
+// the API price.
+func paidValue(b *bill.Bill) string {
+	v := USD(b.Paid)
+	if b.Cost > 0 {
+		v += fmt.Sprintf(" (%s of api-equiv)", percent(b.Paid/b.Cost))
+	}
+	return v
+}
+
+// percent formats a share: 6%, 0.4%, 120%.
+func percent(f float64) string {
+	p := f * 100
+	switch {
+	case p >= 10 || p == 0:
+		return fmt.Sprintf("%.0f%%", p)
+	case p >= 1:
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", p), ".0") + "%"
+	default:
+		return strings.TrimSuffix(fmt.Sprintf("%.2f", p), "0") + "%"
+	}
+}
+
 func oneLine(b *bill.Bill) string {
 	parts := []string{costValue(b)}
+	if b.Planned {
+		parts = append(parts, "paid "+USD(b.Paid))
+	}
 	if len(b.Lines) > 0 {
 		m := b.Lines[0].Model
 		if len(b.Lines) > 1 {
@@ -168,33 +215,39 @@ func standard(b *bill.Bill) []string {
 			models = append(models, l.Model)
 		}
 	}
-	out := []string{
-		"AI-Cost: " + costValue(b),
-		"AI-Tokens: " + tokenLine(b),
-		"AI-Model: " + strings.Join(models, ", "),
-		"AI-Agent: " + strings.Join(b.Agents, ", "),
+	out := []string{"AI-Cost: " + costValue(b)}
+	if b.Planned {
+		out = append(out, "AI-Cost-Paid: "+paidValue(b))
 	}
+	out = append(out,
+		"AI-Tokens: "+tokenLine(b),
+		"AI-Model: "+strings.Join(models, ", "),
+		"AI-Agent: "+strings.Join(b.Agents, ", "),
+	)
 	if b.Turns > 0 {
 		out = append(out, fmt.Sprintf("AI-Turns: %d", b.Turns))
+	}
+	if len(b.SessionIDs) > 0 {
+		out = append(out, "AI-Session: "+strings.Join(b.SessionIDs, ", "))
 	}
 	return append(out, fmt.Sprintf("AI-Cost-Schema: %d", Schema))
 }
 
 // Render is a bill as body art (receipt only) and trailer lines.
-func Render(b *bill.Bill, template string, snacks []Snack) (art, trailers []string) {
-	switch template {
+func Render(b *bill.Bill, o Options) (art, trailers []string) {
+	switch o.Template {
 	case Minimal:
 		return nil, []string{oneLine(b)}
 	case Fun:
 		out := []string{oneLine(b)}
-		if e := Equiv(b.Cost, snacks); e != "" && len(b.Unpriced) < len(b.Lines) {
+		if e := Equiv(b.Cost, o.Snacks); e != "" && len(b.Unpriced) < len(b.Lines) {
 			out = append(out, "AI-Cost-Equiv: "+e)
 		}
 		return nil, out
-	case Receipt:
-		return receiptArt(b, snacks), standard(b)
-	default:
+	case Standard:
 		return nil, standard(b)
+	default:
+		return receiptArt(b, o), standard(b)
 	}
 }
 
@@ -276,7 +329,7 @@ func Barcode(seed string) string {
 	return clip(sb.String(), boxWidth-5)
 }
 
-func receiptArt(b *bill.Bill, snacks []Snack) []string {
+func receiptArt(b *bill.Bill, o Options) []string {
 	l := []string{
 		"",
 		Center(ReceiptMark),
@@ -302,7 +355,19 @@ func receiptArt(b *bill.Bill, snacks []Snack) []string {
 		}
 		l = append(l, detail+"  x"+strconv.Itoa(line.Requests))
 	}
-	l = append(l, strings.Repeat("- ", (boxWidth-2)/2), Item("TOTAL", USD(b.Cost)))
+	rule := strings.Repeat("- ", (boxWidth-2)/2)
+	l = append(l, rule)
+	if b.Planned {
+		l = append(l, Item("SUBTOTAL", USD(b.Cost)))
+		if d := b.Paid - b.Cost; d <= 0 {
+			l = append(l, Item("PLAN DISCOUNT "+percent(-d/b.Cost), "-"+USD(-d)))
+		} else {
+			l = append(l, Item("PLAN SURCHARGE "+percent(d/b.Cost), "+"+USD(d)))
+		}
+		l = append(l, Item("YOU PAID", USD(b.Paid)))
+	} else {
+		l = append(l, Item("TOTAL", USD(b.Cost)))
+	}
 	stats := []string{plural(b.Requests, "call")}
 	if b.Turns > 0 {
 		stats = append([]string{plural(b.Turns, "turn")}, stats...)
@@ -311,8 +376,18 @@ func receiptArt(b *bill.Bill, snacks []Snack) []string {
 		stats = append(stats, Duration(b.Busy)+" busy")
 	}
 	l = append(l, strings.Join(stats, " · "))
-	if e := Equiv(b.Cost, snacks); e != "" {
+	if e := Equiv(b.Cost, o.Snacks); e != "" {
 		l = append(l, e)
+	}
+	if t := o.Tab; t != nil && t.Commits > 0 {
+		l = append(l, rule, Item("TAB SO FAR · "+plural(t.Commits+1, "commit"), USD(t.Cost+b.Cost)))
+		if t.Planned || b.Planned {
+			paid := t.Paid + b.Cost
+			if b.Planned {
+				paid = t.Paid + b.Paid
+			}
+			l = append(l, Item("  paid", USD(paid)))
+		}
 	}
 	l = append(l, "", "  "+Barcode(b.End.String()+USD(b.Cost)), Center("THANK YOU, COME AGAIN"))
 	return Box(l)
