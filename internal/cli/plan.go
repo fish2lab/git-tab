@@ -22,6 +22,7 @@ git tab plan add <name> <terms> <for>... [--worth USD]
                                                 deepseek, pi/anthropic, opencode/opencode-go
 git tab plan rm <name>
 git tab plan measure                            re-measure what each subscription's month is worth
+git tab plan export                             the plans as GIT_TAB_PLANS, for a cloud box's environment
 `
 
 // plans are the tab-plan.* entries of the global git config: what a
@@ -32,6 +33,11 @@ func plans() *plan.Book {
 	for _, l := range strings.Split(out, "\n") {
 		if k, v, ok := strings.Cut(l, " "); ok {
 			m[strings.ToLower(k)] = v
+		}
+	}
+	for k, v := range plan.FromEnv(os.Getenv("GIT_TAB_PLANS")) {
+		if _, set := m[k]; !set {
+			m[k] = v
 		}
 	}
 	return plan.FromConfig(m)
@@ -61,6 +67,11 @@ func planCmd(args []string) int {
 		return 0
 	case "measure":
 		return planMeasure(len(args) > 1 && args[1] == "--quiet")
+	case "export":
+		if v := plans().Export(); v != "" {
+			fmt.Println("GIT_TAB_PLANS=" + v)
+		}
+		return 0
 	case "help", "-h", "--help":
 		fmt.Print(planUsage)
 		return 0

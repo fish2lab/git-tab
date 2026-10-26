@@ -1,0 +1,13 @@
+{
+  "name": "git-tab",
+  "description": "A receipt for every commit an AI helped write: tokens, models and cost from Claude Code, Codex, pi, OpenCode and DeepSeek Harness logs, priced at API rates and at what your subscriptions make it cost.",
+  "version": "0.1.0",
+  "author": {
+    "name": "fish2lab",
+    "url": "https://github.com/fish2lab"
+  },
+  "homepage": "https://github.com/fish2lab/git-tab",
+  "repository": "https://github.com/fish2lab/git-tab",
+  "license": "MIT",
+  "keywords": ["git", "commit", "cost", "tokens", "usage", "receipt", "claude-code", "codex"]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "git-tab",
+  "description": "git-tab: AI cost receipts on git commits",
+  "owner": {
+    "name": "fish2lab",
+    "url": "https://github.com/fish2lab"
+  },
+  "plugins": [
+    {
+      "name": "git-tab",
+      "source": "./",
+      "description": "Explains git-tab receipts, installs git-tab where it is missing, and records what your subscriptions and API keys actually cost."
+    }
+  ]
+}

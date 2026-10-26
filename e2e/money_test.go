@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -150,5 +151,58 @@ func TestTwoMachines(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(local.repo, ".git", "git-tab", "ledger.json")); err != nil {
 		t.Errorf("no ledger here: %v", err)
+	}
+}
+
+// `git tab agents` leaves word for agents elsewhere; on a Claude Code
+// cloud box the hook it adds installs git-tab, and GIT_TAB_PLANS carries
+// the plans there.
+func TestCloud(t *testing.T) {
+	w := newWorld(t)
+	os.WriteFile(filepath.Join(w.repo, "CLAUDE.md"), []byte("# Rules\n- be nice"), 0o644)
+	os.MkdirAll(filepath.Join(w.repo, ".claude"), 0o755)
+	os.WriteFile(filepath.Join(w.repo, ".claude", "settings.json"), []byte(`{"model": "claude-opus-5-5", "hooks": {"Stop": []}}`), 0o644)
+	w.tab("agents")
+	again := w.tab("agents")
+	// Claude Code reads the CLAUDE.md; no AGENTS.md is made beside it.
+	b, _ := os.ReadFile(filepath.Join(w.repo, "CLAUDE.md"))
+	if n := strings.Count(string(b), "AI cost receipts"); n != 1 || !strings.HasPrefix(string(b), "# Rules\n- be nice\n") {
+		t.Errorf("CLAUDE.md has the line %d times, want once after the rules\n%s\n%s", n, b, again)
+	}
+	if _, err := os.Stat(filepath.Join(w.repo, "AGENTS.md")); err == nil {
+		t.Errorf("an AGENTS.md was made beside the CLAUDE.md")
+	}
+	b, _ = os.ReadFile(filepath.Join(w.repo, ".claude", "settings.json"))
+	var settings struct {
+		Model string
+		Hooks map[string][]struct {
+			Hooks []struct{ Command string }
+		}
+	}
+	if err := json.Unmarshal(b, &settings); err != nil || settings.Model != "claude-opus-5-5" || len(settings.Hooks["SessionStart"]) != 1 {
+		t.Fatalf("settings.json lost a key or has no SessionStart hook: %v\n%s", err, b)
+	}
+	hook := settings.Hooks["SessionStart"][0].Hooks[0].Command
+	w.commit(nil, "-m", "init")
+
+	// The box: a fresh clone with git-tab's binary in place and no hooks.
+	box := newWorld(t)
+	box.git("pull", "-q", w.repo, "main")
+	os.MkdirAll(filepath.Join(box.home, ".local", "bin"), 0o755)
+	exe, _ := os.ReadFile(filepath.Join(binDir, "git-tab"))
+	os.WriteFile(filepath.Join(box.home, ".local", "bin", "git-tab"), exe, 0o755)
+	if out, _ := box.run(box.repo, []string{"CLAUDE_PROJECT_DIR=" + box.repo}, "sh", "-c", hook); strings.Contains(box.tab("doctor"), "post-commit:") {
+		t.Fatalf("the hook installed git-tab outside the cloud\n%s", out)
+	}
+	if out, err := box.run(box.repo, []string{"CLAUDE_CODE_REMOTE=true", "CLAUDE_PROJECT_DIR=" + box.repo}, "sh", "-c", hook); err != nil {
+		t.Fatalf("cloud hook: %v\n%s", err, out)
+	}
+	if d := box.tab("doctor"); !strings.Contains(d, "post-commit:") {
+		t.Fatalf("the cloud hook did not install the hooks\n%s", d)
+	}
+	box.assistant("S9", box.repo, time.Now(), cc{id: "m", req: "r", in: 10000, out: 1000}, 1)
+	box.commit([]string{"GIT_TAB_PLANS=claude-max=125/mo@2000:claude-code"}, "-m", "from the cloud")
+	if paid := box.trailers("HEAD")["AI-Cost-Paid"]; len(paid) != 1 || !strings.HasPrefix(paid[0], "$0.0037") && !strings.HasPrefix(paid[0], "$0.0038") {
+		t.Errorf("AI-Cost-Paid = %v, want $0.06 at 6.25%%", paid)
 	}
 }

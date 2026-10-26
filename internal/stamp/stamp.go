@@ -78,6 +78,13 @@ func settings(cfg map[string]string) Settings {
 	if v := cfg["core.commentchar"]; v != "" && v != "auto" {
 		s.CommentChar = v
 	}
+	if v := os.Getenv("GIT_TAB_PLANS"); v != "" {
+		for k, v := range plan.FromEnv(v) {
+			if _, set := cfg[k]; !set {
+				cfg[k] = v
+			}
+		}
+	}
 	s.Plans = plan.FromConfig(cfg)
 	return s
 }

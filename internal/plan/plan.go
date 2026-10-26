@@ -114,6 +114,54 @@ func FromConfig(cfg map[string]string) *Book {
 	return b
 }
 
+// FromEnv reads plans from GIT_TAB_PLANS, for machines without the
+// person's git config (a cloud box): plans joined by ";", each
+// name=terms[@worth]:for,for — what `git tab plan export` prints. They
+// come as tab-plan.* entries to merge into a config map.
+func FromEnv(v string) map[string]string {
+	m := map[string]string{}
+	for _, p := range strings.Split(v, ";") {
+		name, rest, ok := strings.Cut(strings.TrimSpace(p), "=")
+		terms, sel, ok2 := strings.Cut(rest, ":")
+		if !ok || !ok2 || name == "" {
+			continue
+		}
+		terms, worth, _ := strings.Cut(terms, "@")
+		fee, share, err := Terms(terms)
+		if err != nil {
+			continue
+		}
+		k := "tab-plan." + name + "."
+		m[k+"for"] = sel
+		if fee > 0 {
+			m[k+"fee"] = strconv.FormatFloat(fee, 'f', -1, 64)
+			m[k+"worth"] = worth
+		} else {
+			m[k+"share"] = strconv.FormatFloat(share, 'f', -1, 64)
+		}
+	}
+	return m
+}
+
+// Export is b as GIT_TAB_PLANS: subscriptions carry their worth, so the
+// share is the same wherever it is read.
+func (b *Book) Export() string {
+	var out []string
+	for _, p := range b.all() {
+		terms := "x" + strconv.FormatFloat(p.Share, 'f', -1, 64)
+		if p.Fee > 0 {
+			if p.Base() <= 0 {
+				continue
+			}
+			terms = strconv.FormatFloat(p.Fee, 'f', -1, 64) + "/mo@" + strconv.FormatFloat(p.Base(), 'f', -1, 64)
+		} else if p.Share == 1 {
+			terms = "api"
+		}
+		out = append(out, p.Name+"="+terms+":"+strings.Join(p.For, ","))
+	}
+	return strings.Join(out, ";")
+}
+
 // Base is the monthly worth a subscription's share divides its fee by.
 func (p Plan) Base() float64 {
 	if p.Worth > 0 {
