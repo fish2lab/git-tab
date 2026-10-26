@@ -1,0 +1,19 @@
+# Release binaries for install.sh, which fetches
+# releases/latest/download/git-tab_<os>_<arch>.tar.gz.
+version: 2
+project_name: git-tab
+builds:
+  - env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags: -s -w -X github.com/fish2lab/git-tab/internal/cli.Version={{.Version}}
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+checksum:
+  name_template: checksums.txt
+changelog:
+  use: github-native
