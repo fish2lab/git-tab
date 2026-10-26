@@ -556,7 +556,13 @@ func TestHookFiles(t *testing.T) {
 
 func TestGlobalInstall(t *testing.T) {
 	w := newWorld(t)
-	w.tab("install", "--global")
+	if out, err := w.run(w.repo, nil, "git-tab", "install", "--global"); err != nil {
+		// Config-defined hooks arrived in Git 2.54; an older git must refuse and say why.
+		if !strings.Contains(out, "needs Git 2.54") {
+			t.Fatalf("git tab install --global: %v\n%s", err, out)
+		}
+		t.Skip("this git predates config-defined hooks")
+	}
 	w.assistant("S1", w.repo, time.Now(), cc{id: "m1", req: "r1", in: 10000, out: 1000}, 1)
 	w.commit(nil, "-m", "global")
 	if len(w.trailers("HEAD")["AI-Cost"]) != 1 {

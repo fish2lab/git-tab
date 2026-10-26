@@ -179,6 +179,11 @@ func planList() int {
 	if len(b.Plans) == 0 {
 		fmt.Println("  none: every receipt shows API prices only")
 	}
+	nameW, forW := 0, 0
+	for _, p := range b.Plans {
+		nameW = max(nameW, len(p.Name))
+		forW = max(forW, len(strings.Join(p.For, ", ")))
+	}
 	for _, p := range b.Plans {
 		terms := "api key at list price"
 		switch {
@@ -199,7 +204,7 @@ func planList() int {
 		if p.Share > 0 {
 			pays = fmt.Sprintf("pays %.4g%% of API prices", p.Share*100)
 		}
-		fmt.Printf("  %-14s for %-24s %s · %s\n", p.Name, strings.Join(p.For, ", "), terms, pays)
+		fmt.Printf("  %-*s  for %-*s  %s · %s\n", nameW, p.Name, forW, strings.Join(p.For, ", "), terms, pays)
 	}
 	rows := b.Spend(month(now), price.Load())
 	fmt.Println("\nthe last 30 days on this machine, at API prices")
