@@ -119,17 +119,33 @@ func Load() *Catalog {
 }
 
 // providerHints name the provider whose own price a model id most likely
-// means; resellers list the same ids at other prices.
+// means: its maker. Resellers list the same ids at other prices.
 var providerHints = []struct{ prefix, provider string }{
 	{"claude", "anthropic"},
 	{"gpt", "openai"}, {"o1", "openai"}, {"o3", "openai"}, {"o4", "openai"}, {"codex", "openai"},
-	{"gemini", "google"}, {"deepseek", "deepseek"}, {"kimi", "moonshotai"}, {"glm", "zai"},
+	{"gemini", "google"}, {"deepseek", "deepseek"}, {"kimi", "moonshotai"}, {"glm", "zai"}, {"glm", "zhipuai"},
 	{"grok", "xai"}, {"qwen", "alibaba"}, {"mistral", "mistral"}, {"devstral", "mistral"}, {"minimax", "minimax"},
+	{"mimo", "xiaomi"},
+}
+
+// Maker is the provider that makes a model, from its id; "" when unknown.
+func Maker(model string) string {
+	for _, id := range candidates(model) {
+		for _, h := range providerHints {
+			if strings.HasPrefix(id, h.prefix) {
+				return h.provider
+			}
+		}
+	}
+	return ""
 }
 
 var (
 	dateSuffix = regexp.MustCompile(`-\d{8}$`)
 	versionTag = regexp.MustCompile(`-v\d+(:\d+)?$`)
+	// DeepSeek serves and bills every V4 Flash name as deepseek-flash
+	// (api-docs.deepseek.com/quick_start/pricing).
+	deepseekFlash = regexp.MustCompile(`^deepseek-v4[.\d]*-flash$`)
 )
 
 // candidates are the ids a model may be listed under: as logged, then
@@ -151,20 +167,32 @@ func candidates(model string) []string {
 	}
 	id = versionTag.ReplaceAllString(id, "")
 	out = append(out, id, dateSuffix.ReplaceAllString(id, ""))
+	if deepseekFlash.MatchString(id) {
+		out = append(out, "deepseek-flash")
+	}
 	return out
 }
 
-// Lookup finds a model's price.
-func (c *Catalog) Lookup(model string) (Price, bool) {
+// Lookup finds a model's price and the provider whose listing it is: the
+// maker's own, else that of the provider the agent says it called, else
+// the first listing found.
+func (c *Catalog) Lookup(model, provider string) (Price, string, bool) {
 	if c == nil {
-		return Price{}, false
+		return Price{}, "", false
 	}
 	for _, id := range candidates(model) {
 		for _, h := range providerHints {
 			if strings.HasPrefix(id, h.prefix) {
 				if p, ok := c.Providers[h.provider][id]; ok {
-					return p, true
+					return p, h.provider, true
 				}
+			}
+		}
+	}
+	if provider = strings.ToLower(provider); provider != "" {
+		for _, id := range candidates(model) {
+			if p, ok := c.Providers[provider][id]; ok {
+				return p, provider, true
 			}
 		}
 	}
@@ -176,20 +204,42 @@ func (c *Catalog) Lookup(model string) (Price, bool) {
 	for _, id := range candidates(model) {
 		for _, n := range names {
 			if p, ok := c.Providers[n][id]; ok {
-				return p, true
+				return p, n, true
 			}
 		}
 	}
-	return Price{}, false
+	return Price{}, "", false
 }
 
-// Cost prices one request of a model; false when the model is unknown.
-func (c *Catalog) Cost(model string, u agents.Usage, speed string) (float64, bool) {
-	p, ok := c.Lookup(model)
+// Cost prices one request; false when neither the price table nor the
+// agent knows the model.
+func (c *Catalog) Cost(e agents.Event) (float64, bool) {
+	p, from, ok := c.Lookup(e.Model, e.Provider)
 	if !ok {
-		return 0, false
+		return e.Reported, e.Reported > 0
 	}
-	return p.Cost(u, speed), true
+	cost := p.Cost(e.Usage, e.Speed)
+	if from == "deepseek" && deepseekPeak(e.Time) {
+		cost *= 2
+	}
+	return cost, true
+}
+
+// beijing is UTC+8, without daylight saving.
+var beijing = time.FixedZone("CST", 8*3600)
+
+// deepseekPeak says whether DeepSeek bills a request at its peak rate:
+// weekdays 9:00-12:00 and 14:00-18:00 Beijing time cost twice the idle
+// rate, which is the one models.dev lists (api-docs.deepseek.com/zh-cn/
+// quick_start/pricing, read 2026-10-26). Public holidays, billed idle, are
+// not known here and count as weekdays.
+func deepseekPeak(t time.Time) bool {
+	b := t.In(beijing)
+	if wd := b.Weekday(); wd == time.Saturday || wd == time.Sunday {
+		return false
+	}
+	h := b.Hour()
+	return h >= 9 && h < 12 || h >= 14 && h < 18
 }
 
 // FromModelsDev converts models.dev's api.json into a Catalog, keeping only

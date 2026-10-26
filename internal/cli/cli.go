@@ -280,12 +280,15 @@ func pricesCmd(args []string) int {
 		c := price.Load()
 		fmt.Printf("prices: %s catalog from %s, fetched %s\n", c.From, c.Source, c.Fetched.Local().Format("2006-01-02"))
 		for _, m := range args[1:] {
-			p, ok := c.Lookup(m)
+			p, from, ok := c.Lookup(m, "")
 			if !ok {
 				fmt.Printf("  %s: unknown\n", m)
 				continue
 			}
-			fmt.Printf("  %s: %s per MTok\n", m, rates(p.Flat))
+			fmt.Printf("  %s (%s): %s per MTok\n", m, from, rates(p.Flat))
+			if from == "deepseek" {
+				fmt.Println("    twice that on weekdays 9:00-12:00 and 14:00-18:00 Beijing time (DeepSeek's peak rate)")
+			}
 			for _, t := range p.Tiers {
 				fmt.Printf("    over %s prompt tokens: %s\n", render.Tokens(t.Above), rates(t.Flat))
 			}

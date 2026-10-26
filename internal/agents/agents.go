@@ -61,8 +61,15 @@ type Event struct {
 	Cwd     string
 	Kind    Kind
 	Model   string
-	Speed   string // "fast" when billed at Anthropic's fast-mode rate
-	Usage   Usage
+	// Provider is who the agent says it called (deepseek, opencode-go,
+	// openrouter, ...) when its log says; the model's maker is assumed
+	// otherwise.
+	Provider string
+	Speed    string // "fast" when billed at Anthropic's fast-mode rate
+	Usage    Usage
+	// Reported is what the agent itself priced the call at, if it does:
+	// the fallback for a model missing from the price table.
+	Reported float64
 }
 
 // Query narrows a scan. Adapters must return every event in (Since, Until]

@@ -36,7 +36,7 @@ func (b *Bill) Empty() bool { return b == nil || b.Requests == 0 }
 
 // Pricer prices one request.
 type Pricer interface {
-	Cost(model string, u agents.Usage, speed string) (float64, bool)
+	Cost(e agents.Event) (float64, bool)
 }
 
 // idle is the longest gap between two events of a thread that still counts
@@ -69,7 +69,7 @@ func Build(events []agents.Event, p Pricer, end time.Time) *Bill {
 		}
 		l.Usage.Add(e.Usage)
 		l.Requests++
-		if c, ok := p.Cost(e.Model, e.Usage, e.Speed); ok {
+		if c, ok := p.Cost(e); ok {
 			l.Cost += c
 			agentCost[e.Agent] += c
 		} else {
