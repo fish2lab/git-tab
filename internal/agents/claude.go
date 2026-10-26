@@ -116,13 +116,22 @@ var (
 )
 
 func (c claudeCode) Scan(q Query, emit func(Event)) error {
+	// A forked or resumed session starts a new log that repeats its parent's
+	// prompts and calls under the new session's id. Each belongs to the
+	// session whose log was created first.
 	type call struct {
-		ev  Event
-		out int64
+		ev   Event
+		out  int64
+		born time.Time
 	}
 	var calls []call
 	seen := map[string]int{}
-	prompts := map[string]bool{}
+	type prompt struct {
+		ev   Event
+		born time.Time
+	}
+	prompts := map[string]*prompt{}
+	var order []string
 	for _, root := range c.Roots() {
 		projects, err := os.ReadDir(root)
 		if err != nil {
@@ -136,6 +145,7 @@ func (c claudeCode) Scan(q Query, emit func(Event)) error {
 				return strings.HasSuffix(path, ".jsonl")
 			})
 			for _, f := range files {
+				b := born(f)
 				eachLine(f, func(line []byte) {
 					switch {
 					case bytes.Contains(line, ccAssistantType) && bytes.Contains(line, ccUsageKey):
@@ -158,19 +168,22 @@ func (c claudeCode) Scan(q Query, emit func(Event)) error {
 						}
 						key := l.Message.ID + "\x00" + l.RequestID
 						if l.Message.ID == "" && l.RequestID == "" {
-							calls = append(calls, call{ev, u.Output})
+							calls = append(calls, call{ev, u.Output, b})
 							return
 						}
 						if i, ok := seen[key]; ok {
+							c := &calls[i]
+							if ev.Session != c.ev.Session && b.Before(c.born) {
+								c.ev.Session, c.ev.Thread, c.ev.Cwd, c.born = ev.Session, ev.Thread, ev.Cwd, b
+							}
 							// Keep the fullest revision of the call, at its first time.
-							if u.Output > calls[i].out {
-								ev.Time = calls[i].ev.Time
-								calls[i] = call{ev, u.Output}
+							if u.Output > c.out {
+								c.ev.Model, c.ev.Usage, c.ev.Speed, c.out = ev.Model, ev.Usage, ev.Speed, u.Output
 							}
 							return
 						}
 						seen[key] = len(calls)
-						calls = append(calls, call{ev, u.Output})
+						calls = append(calls, call{ev, u.Output, b})
 					case bytes.Contains(line, ccUserType) && !bytes.Contains(line, ccToolResult):
 						if t, ok := lineTime(line); ok && !q.holds(t) {
 							return
@@ -179,17 +192,26 @@ func (c claudeCode) Scan(q Query, emit func(Event)) error {
 						if json.Unmarshal(line, &l) != nil || l.IsMeta || l.IsSidechain || !q.holds(l.Timestamp) || !ccHuman(l) {
 							return
 						}
-						if l.PromptID != "" {
-							if prompts[l.SessionID+l.PromptID] {
-								return
-							}
-							prompts[l.SessionID+l.PromptID] = true
+						ev := Event{Agent: c.Name(), Session: l.SessionID, Thread: l.SessionID, Time: l.Timestamp, Cwd: l.Cwd, Kind: Prompt}
+						if l.PromptID == "" {
+							emit(ev)
+							return
 						}
-						emit(Event{Agent: c.Name(), Session: l.SessionID, Thread: l.SessionID, Time: l.Timestamp, Cwd: l.Cwd, Kind: Prompt})
+						if p, ok := prompts[l.PromptID]; ok {
+							if ev.Session != p.ev.Session && b.Before(p.born) {
+								*p = prompt{ev, b}
+							}
+							return
+						}
+						prompts[l.PromptID] = &prompt{ev, b}
+						order = append(order, l.PromptID)
 					}
 				})
 			}
 		}
+	}
+	for _, id := range order {
+		emit(prompts[id].ev)
 	}
 	for _, c := range calls {
 		if !c.ev.Usage.Zero() {

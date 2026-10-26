@@ -310,6 +310,32 @@ func TestPreciseSession(t *testing.T) {
 	}
 }
 
+// Forking or resuming a Claude Code session starts a new log that repeats the
+// old one's prompts and calls under the new session's id. The copies stay the
+// old session's: a commit from the fork bills only what the fork did.
+func TestForkedSession(t *testing.T) {
+	w := newWorld(t)
+	w.tab("install")
+	now := time.Now()
+	w.prompt("S2", w.repo, now.Add(-4*time.Minute), "p1")
+	w.assistant("S2", w.repo, now.Add(-3*time.Minute), cc{id: "m1", req: "r1", in: 10000, out: 1000}, 1) // $0.06
+	w.commit([]string{"CLAUDE_CODE_SESSION_ID=S2"}, "-m", "original")
+
+	// The fork's log sorts before the original's.
+	w.prompt("S1", w.repo, now.Add(-4*time.Minute), "p1")
+	w.assistant("S1", w.repo, now.Add(-3*time.Minute), cc{id: "m1", req: "r1", in: 10000, out: 1000}, 1)
+	w.prompt("S1", w.repo, now.Add(-2*time.Minute), "p2")
+	w.assistant("S1", w.repo, now.Add(-time.Minute), cc{id: "m2", req: "r2", in: 20000, out: 2000}, 1) // $0.12
+	w.commit([]string{"CLAUDE_CODE_SESSION_ID=S1"}, "-m", "fork")
+	tr := w.trailers("HEAD")
+	if got := tr["AI-Cost"]; len(got) != 1 || got[0] != "$0.120 (api-equiv)" {
+		t.Fatalf("fork commit AI-Cost = %v, want $0.120 (the fork's own call)\n%s", got, w.message("HEAD"))
+	}
+	if got := tr["AI-Turns"]; len(got) != 1 || got[0] != "1" {
+		t.Errorf("fork commit AI-Turns = %v, want 1\n%s", got, w.message("HEAD"))
+	}
+}
+
 // Codex: a compressed rollout with a repeated checkpoint, and a forked
 // subagent replaying its parent's checkpoint with last = 0. gpt-5.5 at $5
 // input, $0.50 cached, $30 output.
