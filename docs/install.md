@@ -10,7 +10,7 @@ The script puts one binary in `~/.local/bin` (`GIT_TAB_BIN_DIR` picks another pl
 
 On an older git the script says so, and you run `git tab install` inside each repository instead. That writes hook files into the repository's hooks directory; a hook that was already there is kept and runs after git-tab's.
 
-With Go: `go install github.com/fish2lab/git-tab@latest && git tab install --global`.
+With Go 1.26 or later: `go install github.com/fish2lab/git-tab@latest && git tab install --global`.
 
 On a machine whose locale is Chinese, the installer also sets `tab.snacks` so receipts count money in 杯咖啡 and 个煎饼果子. Everywhere else it is coffees and pizza slices.
 

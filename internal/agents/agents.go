@@ -1,8 +1,9 @@
 // Package agents reads coding-agent session logs into usage events.
 //
 // Each agent is an Adapter registered from its own file (claude.go,
-// codex.go). Supporting another agent means adding one file whose Adapter
-// turns that agent's local logs into Events; nothing else has to change.
+// codex.go, pi.go, opencode.go, dsh.go). Supporting another agent means
+// adding one file whose Adapter turns that agent's local logs into Events;
+// nothing else has to change.
 package agents
 
 import (

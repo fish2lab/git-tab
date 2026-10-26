@@ -41,7 +41,7 @@ git commit
 
 跨机器：账本只在本机，小票随 commit 走。每张小票用 `AI-Session: agent/会话 id 末 8 位` 写明结算了哪些会话。stamp 时读一遍 lookback 窗口内的 `git log`，凡是不在本机账本里的 commit（别的机器、云端容器打的戳）所点名的会话，把它在那个 commit 作者时间之前的用量视为已结算。这样 `claude --teleport` 把云端对话拉回本地、或者 instabox 之类工具把对话搬到另一台机器时，同一段用量不会记两次（`TestTwoMachines` 覆盖）。用作者时间是因为 rebase 会改提交时间、不改作者时间。
 
-实付：`tab-plan.<名>.*`（全局 git config，或云端用的 `GIT_TAB_PLANS` 环境变量）登记「什么由谁付、按什么比例」。按 agent/路由 → agent/厂商 → 路由 → 厂商 → agent 的顺序匹配；厂商排在单独的 agent 前面，是因为经 magpie 之类网关把 Claude Code 转给 DeepSeek 时，这部分不该算进 Claude Max。订阅的比例 = 月费 ÷ 一个月用量的 API 价：用户自报 `--worth` 优先，没有就从本机 30 天日志测，日志不足 30 天按比例放大，每周在后台重测一次。本机日志看不到 claude.ai 网页端和其他设备上的用量，所以自报通常更准。
+实付：`tab-plan.<名>.*`（全局 git config，或云端用的 `GIT_TAB_PLANS` 环境变量）登记「什么由谁付、按什么比例」。「谁收钱」取日志里写明的服务商，没写才取模型厂商；按 agent/谁收钱 → 谁收钱 → agent 的顺序匹配。谁收钱排在单独的 agent 前面，是因为经 magpie 之类网关把 Claude Code 转给 DeepSeek 时，这部分不该算进 Claude Max；日志写明服务商时不再看厂商，是因为 OpenCode Go 卖的 DeepSeek 模型不该算到 DeepSeek 官方 key 上。订阅的比例 = 月费 ÷ 一个月用量的 API 价：用户自报 `--worth` 优先，没有就从本机 30 天日志测，日志不足 30 天按比例放大，每周在后台重测一次。本机日志看不到 claude.ai 网页端和其他设备上的用量，所以自报通常更准。
 
 累计账单：receipt 模板最后一行是当前分支历史里所有小票之和，从 `git log` 的 trailer 里加，所以别的机器、队友的 commit 也算在内。结果按 HEAD 缓存在账本里，下一个 commit 直接在缓存上加一笔，不用重新遍历历史（本机最大的仓库 2472 个 commit，遍历一次约 60ms）。
 

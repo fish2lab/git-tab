@@ -7,11 +7,11 @@ Tokens, models and cost from Claude Code, Codex, pi, OpenCode and DeepSeek Harne
 
 <p align="center">
 <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
-<img alt="Go 1.25+" src="https://img.shields.io/badge/go-1.25%2B-00ADD8">
+<img alt="Go 1.26+" src="https://img.shields.io/badge/go-1.26%2B-00ADD8">
 <img alt="Git 2.54+ for one-command setup" src="https://img.shields.io/badge/git-2.54%2B-F05032">
 </p>
 
-<p align="center"><img src="docs/images/receipt-en.png" width="520" alt="git log -1 on a commit made by Claude Code: the message carries an AI receipt. claude-opus-5-5 cost $5.47 at API prices over 64 calls; on a $125 Claude Max plan worth $2,000 a month the user paid $0.342; the branch's tab is $10.36 over 3 commits. Below the receipt are AI-Cost, AI-Cost-Paid, AI-Tokens, AI-Model, AI-Agent, AI-Turns and AI-Session trailers."></p>
+<p align="center"><img src="docs/images/receipt-en.png" width="520" alt="git log -1 on a commit made by Claude Code: the message carries an AI receipt. claude-opus-5-5 cost $5.47 at API prices over 64 calls; on a $125 Claude Max plan worth $2,000 a month the user paid $0.342; the branch's tab is $10.73 over 4 commits, $3.19 paid. Below the receipt are AI-Cost, AI-Cost-Paid, AI-Tokens, AI-Model, AI-Agent, AI-Turns and AI-Session trailers."></p>
 
 ## Install
 
@@ -29,7 +29,7 @@ Uninstall with `curl -fsSL https://raw.githubusercontent.com/fish2lab/git-tab/ma
 
 ## What it does
 
-- **Bills each commit, never blocks one.** At commit time git-tab reads the agents' logs on your machine and prices every request since the last receipt at [models.dev](https://models.dev) rates: cache reads and writes, long-context tiers, Claude's fast mode, DeepSeek's peak hours. The hooks always exit 0 and add about 50 ms to a commit.
+- **Bills each commit, never blocks one.** At commit time git-tab reads the agents' logs on your machine and prices every request since the last receipt at [models.dev](https://models.dev) rates: cache reads and writes, long-context tiers, Claude's fast mode, DeepSeek's peak hours. The hooks always exit 0 and add 50 to 150 ms to a commit.
 - **Shows what you actually paid.** Tell it once that Claude Max costs you $125 a month for about $2,000 of API-priced usage, and Claude Code commits show 6.25% of the API price: SUBTOTAL, PLAN DISCOUNT, YOU PAID. A DeepSeek key at list price, a reseller at half price, a subscription measured from your own logs: [plans](docs/reference.md#plans-what-you-actually-pay).
 - **Bills the right session.** When an agent commits, only its own session is on the receipt; parallel agents, work trees and amends each get their own share. Commits you type yourself pick up every session in the repository.
 - **Keeps a running tab.** Each receipt ends with the total of every receipt in the branch's history, commits from teammates and other machines included.
@@ -38,7 +38,7 @@ Uninstall with `curl -fsSL https://raw.githubusercontent.com/fish2lab/git-tab/ma
 
 ## Read the bill
 
-<p align="center"><img src="docs/images/summary.png" width="560" alt="git tab summary for a project: 3 of 4 commits carry a receipt, $10.36 at API prices, $2.81 paid, split by model (claude-opus-5-5 78%, gpt-5.5 22%) and by agent (claude-code, codex), with the priciest commits listed."></p>
+<p align="center"><img src="docs/images/summary.png" width="560" alt="git tab summary for a project: 4 of 5 commits carry a receipt, $10.73 at API prices, $3.19 paid, split by model (claude-opus-5-5 75%, gpt-5.5 22%, deepseek-v4-pro 3%) and by agent (claude-code, codex, pi), with the priciest commits listed."></p>
 
 | command | |
 |---|---|
@@ -73,7 +73,7 @@ Prefer one line? `git config --global tab.template minimal`. Every format, setti
 | Codex | `CODEX_THREAD_ID` |
 | pi | `PI_SESSION_ID` |
 | OpenCode | `OPENCODE_SESSION_ID` |
-| DeepSeek Harness | `GIT_TAB_SESSION=dsh:<id>`, or the working directory |
+| DeepSeek Harness, omp, ZCode | `GIT_TAB_SESSION=<agent>:<id>`, or the working directory |
 
 Any other agent is one Go file: [teach it another agent](docs/reference.md#teach-it-another-agent).
 
@@ -85,7 +85,7 @@ Any other agent is one Go file: [teach it another agent](docs/reference.md#teach
 
 **I pay a flat subscription. Is the API price meaningful?** It is what the same work would cost without one. With a [plan](docs/reference.md#plans-what-you-actually-pay), each receipt also shows your share of the subscription.
 
-**Will it slow down or break my commits?** A commit takes about 50 ms longer. A hook that fails or runs past 4 seconds is dropped and the commit goes through without a receipt.
+**Will it slow down or break my commits?** A commit takes 50 to 150 ms longer, depending on how long the session's log is. A hook that fails or runs past 4 seconds is dropped and the commit goes through without a receipt.
 
 **Does anything leave my machine?** Only the weekly download of the public price table.
 

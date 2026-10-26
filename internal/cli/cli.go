@@ -331,7 +331,7 @@ func doctorCmd() int {
 		for _, root := range ad.Roots() {
 			n, newest := 0, time.Time{}
 			filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-				if err == nil && !d.IsDir() && (strings.HasSuffix(path, ".jsonl") || strings.HasSuffix(path, ".jsonl.zst")) {
+				if err == nil && !d.IsDir() && isLog(d.Name()) {
 					n++
 					if info, err := d.Info(); err == nil && info.ModTime().After(newest) {
 						newest = info.ModTime()
@@ -375,6 +375,16 @@ func doctorCmd() int {
 		}
 	}
 	return 0
+}
+
+// isLog says a file is one of the session logs or databases agents keep.
+func isLog(name string) bool {
+	for _, suf := range []string{".jsonl", ".jsonl.zst", ".jsonl.zstd", ".db", ".sqlite"} {
+		if strings.HasSuffix(name, suf) {
+			return true
+		}
+	}
+	return false
 }
 
 func count(n int, one string) string {

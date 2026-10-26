@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -436,4 +437,42 @@ func TestDsh(t *testing.T) {
 	wantTrailer(t, w, "AI-Cost", "$0.037 (api-equiv)")
 	wantTrailer(t, w, "AI-Model", "deepseek-v4-flash")
 	wantTrailer(t, w, "AI-Turns", "1")
+}
+
+// An agent whose logs cannot be read, such as a damaged or locked
+// database, loses nothing: the commit settles only what it did read, and
+// the rest goes on a receipt once the logs can be read again.
+func TestUnreadableLogs(t *testing.T) {
+	w := newWorld(t)
+	w.tab("install")
+	path := filepath.Join(w.home, ".local", "share", "opencode", "opencode.db")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte("not a database"), 0o644)
+	now := time.Now()
+	w.assistant("S1", w.repo, now.Add(-2*time.Minute), cc{id: "m1", req: "r1", in: 10000, out: 1000}, 1)
+	w.commit(nil, "-m", "while OpenCode's database is damaged")
+	wantTrailer(t, w, "AI-Cost", "$0.060 (api-equiv)")
+
+	// Repaired, it holds a call made before that commit.
+	os.Remove(path)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := now.Add(-3 * time.Minute).UnixMilli()
+	data, _ := json.Marshal(map[string]any{"time": map[string]any{"created": at, "completed": at + 900},
+		"model":  map[string]any{"id": "claude-opus-5-5", "providerID": "anthropic"},
+		"tokens": map[string]any{"input": 10000, "output": 1000, "reasoning": 0, "cache": map[string]any{"read": 0, "write": 0}}})
+	for _, q := range []string{openCodeSchema,
+		`INSERT INTO session_v2 (id, project_id, slug, directory, version, time_created, time_updated) VALUES ('ses_1', 'global', 's', '` + w.repo + `', '2.1.4', ` + fmt.Sprint(at) + `, ` + fmt.Sprint(at) + `)`,
+		`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES ('msg_1', 'ses_1', 'assistant', 1, ` + fmt.Sprint(at) + `, ` + fmt.Sprint(at) + `, '` + string(data) + `')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	db.Close()
+	w.commit(nil, "-m", "after it is repaired")
+	wantTrailer(t, w, "AI-Cost", "$0.060 (api-equiv)")
+	wantTrailer(t, w, "AI-Agent", "opencode")
 }

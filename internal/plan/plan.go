@@ -24,6 +24,7 @@ package plan
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -180,27 +181,23 @@ func Selectors(v string) []string {
 }
 
 // Keys are what an event can be paid for under, most specific first. Who
-// bills a call (the provider, else the model's maker) comes before the
-// agent alone: a plan for claude-code does not pay for the DeepSeek calls
-// a gateway routes it to when a deepseek plan does.
+// bills a call comes before the agent alone: the provider the log names,
+// else the model's maker. A plan for claude-code does not pay for the
+// DeepSeek calls a gateway routes it to when a deepseek plan exists, and a
+// deepseek key does not pay for DeepSeek models OpenCode Go serves.
 func Keys(e agents.Event) []string {
-	maker := price.Maker(e.Model)
-	route := strings.ToLower(e.Provider)
+	payer := strings.ToLower(e.Provider)
+	if payer == "" {
+		payer = price.Maker(e.Model)
+	}
 	var out []string
 	add := func(s string) {
-		if s != "" && s != "/" && !strings.HasPrefix(s, "/") && !strings.HasSuffix(s, "/") {
-			for _, o := range out {
-				if o == s {
-					return
-				}
-			}
+		if s != "" && !strings.HasPrefix(s, "/") && !strings.HasSuffix(s, "/") && !slices.Contains(out, s) {
 			out = append(out, s)
 		}
 	}
-	add(e.Agent + "/" + route)
-	add(e.Agent + "/" + maker)
-	add(route)
-	add(maker)
+	add(e.Agent + "/" + payer)
+	add(payer)
 	add(e.Agent)
 	return out
 }

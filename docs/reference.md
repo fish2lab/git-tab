@@ -41,7 +41,7 @@ git tab plan                                                  # your plans, and 
 ```
 
 - **Terms**: `125/mo`, `1500/yr` (a subscription), `api` (list price), `x0.5` or `50%` (a share of list price).
-- **What it pays for**: an agent (`claude-code`), a provider the agent called (`deepseek`, `openrouter`, `opencode-go`) or the model's maker, or an agent and a provider joined by a slash (`pi/anthropic`). The most specific match wins, and a provider or maker match beats an agent-only one, so a `claude-code` subscription does not pay for DeepSeek calls a gateway routes Claude Code to when a `deepseek` plan exists.
+- **What it pays for**: an agent (`claude-code`), whoever bills the call (`deepseek`, `openrouter`, `opencode-go`), or both joined by a slash (`pi/anthropic`). Whoever bills is the provider the agent's log names, else the model's maker. The most specific match wins, and a match on who bills beats an agent-only one: a `claude-code` subscription does not pay for the DeepSeek calls a gateway routes Claude Code to when a `deepseek` plan exists, and a `deepseek` key does not pay for DeepSeek models served by OpenCode Go.
 - **A subscription's share** is its monthly fee over what a month of its usage is worth at API prices: $125 / $2,000 = 6.25%. Without `--worth`, git-tab measures the worth from the last 30 days of this machine's logs (scaled up when the logs are younger) and measures again weekly, in the background, after a commit. Usage on other devices and on claude.ai is invisible to it, so a stated worth is usually closer.
 - Plans live in your global git config (`[tab-plan "claude-max"]`). `GIT_TAB_PLANS`, printed by `git tab plan export`, carries them to a machine without that config.
 
@@ -67,6 +67,7 @@ A receipt with a plan adds `AI-Cost-Paid` and the lines SUBTOTAL, PLAN DISCOUNT 
 
 ## It stays out of the way
 
+- A commit takes about 50 ms longer in a new repository and about 125 ms when the committing session's log is 14 MB (MacBook Air M5, Git 2.56).
 - The hooks always exit 0. A panic is caught, and a hook still busy after `tab.timeout` (4 s) is left behind; the commit goes on without a receipt.
 - A deleted binary makes the hooks do nothing.
 - An empty message still aborts the commit. In the editor, the receipt is added after you save, and only if you wrote something.
@@ -111,8 +112,12 @@ Schema 1. Every line is a git trailer, so `git interpret-trailers` and `git log 
 | Claude Code | `~/.claude/projects`, `~/.config/claude/projects`, `$CLAUDE_CONFIG_DIR` | `CLAUDE_CODE_SESSION_ID` |
 | Codex | `~/.codex/sessions`, `~/.codex/archived_sessions`, `$CODEX_HOME` (`.jsonl`, `.jsonl.zst`) | `CODEX_THREAD_ID` |
 | pi | `~/.pi/agent/sessions`, `$PI_CODING_AGENT_DIR`, `$PI_CODING_AGENT_SESSION_DIR` | `PI_SESSION_ID` |
-| OpenCode | `~/.local/share/opencode/opencode.db` | `OPENCODE_SESSION_ID` |
-| DeepSeek Harness | DeepSeek Harness's local session store | `GIT_TAB_SESSION=dsh:<id>` |
+| omp (oh-my-pi) | `~/.omp/agent/sessions`, `~/.omp/profiles/*/agent/sessions` | set `GIT_TAB_SESSION=omp:<id>` |
+| OpenCode | `~/.local/share/opencode/opencode.db` (`$XDG_DATA_HOME`, `$OPENCODE_DB`), and its older JSON storage | `OPENCODE_SESSION_ID` |
+| ZCode | `~/.zcode/cli/db/db.sqlite` | set `GIT_TAB_SESSION=zcode:<id>` |
+| DeepSeek Harness | `~/.dsh/sessions`, `$DSH_HOME` (`.jsonl`, `.jsonl.zstd`) | set `GIT_TAB_SESSION=dsh:<id>` |
+
+Without a session id, a commit bills every session whose working directory is in the repository. Databases are opened read-only and left untouched. When an agent's logs cannot be read, say a locked database, the commit settles only the sessions it did read; the rest waits for a later commit.
 
 git-tab only reads them. Nothing leaves your machine except the weekly price download.
 

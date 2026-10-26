@@ -7,11 +7,11 @@
 
 <p align="center">
 <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
-<img alt="Go 1.25+" src="https://img.shields.io/badge/go-1.25%2B-00ADD8">
+<img alt="Go 1.26+" src="https://img.shields.io/badge/go-1.26%2B-00ADD8">
 <img alt="一条命令装好需要 Git 2.54+" src="https://img.shields.io/badge/git-2.54%2B-F05032">
 </p>
 
-<p align="center"><img src="docs/images/receipt-zh.png" width="520" alt="git log -1 显示一个由 Claude Code 提交的 commit，message 里带着 AI 小票：claude-opus-5-5 按 API 官价 64 次调用共 $5.47；用户的 Claude Max 每月 $125、折合 API 用量 $2,000，实付 $0.342；这个分支累计 3 个 commit 共 $10.36。小票下方是 AI-Cost、AI-Cost-Paid、AI-Tokens、AI-Model、AI-Agent、AI-Turns、AI-Session 等 trailer。"></p>
+<p align="center"><img src="docs/images/receipt-zh.png" width="520" alt="git log -1 显示一个由 Claude Code 提交的 commit，message 里带着 AI 小票：claude-opus-5-5 按 API 官价 64 次调用共 $5.47；用户的 Claude Max 每月 $125、折合 API 用量 $2,000，实付 $0.342；这个分支累计 4 个 commit 共 $10.73，实付 $3.19。小票下方是 AI-Cost、AI-Cost-Paid、AI-Tokens、AI-Model、AI-Agent、AI-Turns、AI-Session 等 trailer。"></p>
 
 ## 安装
 
@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/fish2lab/git-tab/main/install.sh | 
 
 ## 它做什么
 
-- **每个 commit 记账，从不拦 commit。** 提交时读取本机 agent 日志，把上一张小票之后的每次请求按 [models.dev](https://models.dev) 的价格逐条计价：缓存读写分开算，长上下文分档、Claude 快速模式、DeepSeek 高峰时段双倍都算进去。钩子永远返回 0，每次 commit 多花约 50 毫秒。
+- **每个 commit 记账，从不拦 commit。** 提交时读取本机 agent 日志，把上一张小票之后的每次请求按 [models.dev](https://models.dev) 的价格逐条计价：缓存读写分开算，长上下文分档、Claude 快速模式、DeepSeek 高峰时段双倍都算进去。钩子永远返回 0，每次 commit 多花 50 到 150 毫秒。
 - **算出你实际付了多少。** 告诉它一次「Claude Max 每月 $125，大约用掉 $2,000 的 API 等价额度」，之后 Claude Code 的 commit 就按 API 价的 6.25% 记实付，小票上列出 SUBTOTAL、PLAN DISCOUNT、YOU PAID 三行。DeepSeek 官方 key 按原价、中转站打五折、订阅额度按本机日志自动测算，都可以登记，见[订阅与实付](docs/reference.md#plans-what-you-actually-pay)。
 - **账记在对的会话上。** agent 自己 commit 时，小票只算它这个会话；并行的多个 agent、多个 worktree、`--amend` 各算各的。你手动 commit 时，仓库里所有会话的用量合在一张小票上。
 - **小票底部有累计总额。** 每张小票最后一行是当前分支历史里所有小票的合计，队友和其他机器上的 commit 也算在内。
@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/fish2lab/git-tab/main/install.sh | 
 
 ## 看账单
 
-<p align="center"><img src="docs/images/summary.png" width="560" alt="git tab summary：4 个 commit 中 3 个带小票，按 API 价共 $10.36，实付 $2.81，按模型（claude-opus-5-5 78%、gpt-5.5 22%）和 agent（claude-code、codex）拆分，并列出最贵的几个 commit。"></p>
+<p align="center"><img src="docs/images/summary.png" width="560" alt="git tab summary：5 个 commit 中 4 个带小票，按 API 价共 $10.73，实付 $3.19，按模型（claude-opus-5-5 75%、gpt-5.5 22%、deepseek-v4-pro 3%）和 agent（claude-code、codex、pi）拆分，并列出最贵的几个 commit。"></p>
 
 | 命令 | |
 |---|---|
@@ -73,7 +73,7 @@ AI-Cost-Schema: 1
 | Codex | `CODEX_THREAD_ID` |
 | pi | `PI_SESSION_ID` |
 | OpenCode | `OPENCODE_SESSION_ID` |
-| DeepSeek Harness | `GIT_TAB_SESSION=dsh:<id>`，或按工作目录 |
+| DeepSeek Harness、omp、ZCode | `GIT_TAB_SESSION=<agent>:<id>`，或按工作目录 |
 
 再接一个 agent 只需要写一个 Go 文件，见[接入新 agent](docs/reference.md#teach-it-another-agent)。
 
@@ -85,7 +85,7 @@ AI-Cost-Schema: 1
 
 **我用的是包月订阅，API 价还有意义吗？** API 价是同样的活不订阅要花的钱。登记了[订阅](docs/reference.md#plans-what-you-actually-pay)之后，每张小票还会写出你这份订阅分摊下来的实付。
 
-**会拖慢或者搞坏我的 commit 吗？** 每次 commit 多约 50 毫秒。钩子出错或者跑超过 4 秒就会被放弃，commit 照常完成，只是没有小票。
+**会拖慢或者搞坏我的 commit 吗？** 每次 commit 多 50 到 150 毫秒，会话日志越长越慢。钩子出错或者跑超过 4 秒就会被放弃，commit 照常完成，只是没有小票。
 
 **会上传什么吗？** 只有每周下载一次公开的价格表。
 

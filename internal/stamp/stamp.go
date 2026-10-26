@@ -169,6 +169,10 @@ type Window struct {
 	// such commit: a session whose log was copied here, by a handoff or a
 	// teleport, is already settled up to then.
 	Foreign map[string]time.Time
+	// Partial says an agent's logs could not be read (a locked database):
+	// the commit then settles only the threads it billed, and the unread
+	// usage waits for a later one.
+	Partial bool
 }
 
 // key names what the ledger settles separately: a thread, so that a
@@ -511,7 +515,7 @@ func (h *hook) stamp(p *ledger.Pending, msg string) (string, bool) {
 	}
 	// Work trees share the ledger, and a commit in one sees none of the
 	// usage in the others: it settles only the threads it billed.
-	if w.Scope != nil || h.repo.Linked() {
+	if w.Scope != nil || w.Partial || h.repo.Linked() {
 		p.Threads = threads
 	}
 	h.logf("stamped %s: calls=%d turns=%d template=%s scope=%s", render.USD(b.Cost), b.Requests, b.Turns, h.s.Template, w.Scope)
@@ -549,6 +553,7 @@ func (h *hook) bill(amend bool, scope *Scope) (*bill.Bill, Window, []string, err
 	for _, e := range errs {
 		h.logf("%v", e)
 	}
+	w.Partial = len(errs) > 0
 	cat := price.Load()
 	h.logf("%d events, prices %s %s, %d plans", len(events), cat.From, cat.Fetched.Format("2006-01-02"), len(h.s.Plans.Plans))
 	return bill.Build(events, cat, h.s.Plans, now), w, threads, nil
