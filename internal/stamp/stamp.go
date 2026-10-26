@@ -119,16 +119,21 @@ func (s *Scope) String() string {
 
 // EnvScope reads the committing agent's session from the environment:
 // GIT_TAB_SESSION=<agent>:<id> for any agent, else what Claude Code
-// (CLAUDE_CODE_SESSION_ID) and Codex (CODEX_THREAD_ID, CODEX_SESSION_ID)
-// pass to the commands they run.
+// (CLAUDE_CODE_SESSION_ID), pi (PI_SESSION_ID), OpenCode
+// (OPENCODE_SESSION_ID) and Codex (CODEX_THREAD_ID, CODEX_SESSION_ID) pass
+// to the commands they run.
 func EnvScope() *Scope {
 	if v := os.Getenv("GIT_TAB_SESSION"); v != "" {
 		if a, id, ok := strings.Cut(v, ":"); ok && id != "" {
 			return &Scope{Agent: a, IDs: []string{id}}
 		}
 	}
-	if v := os.Getenv("CLAUDE_CODE_SESSION_ID"); v != "" {
-		return &Scope{Agent: "claude-code", IDs: []string{v}}
+	for _, e := range []struct{ env, agent string }{
+		{"CLAUDE_CODE_SESSION_ID", "claude-code"}, {"PI_SESSION_ID", "pi"}, {"OPENCODE_SESSION_ID", "opencode"},
+	} {
+		if v := os.Getenv(e.env); v != "" {
+			return &Scope{Agent: e.agent, IDs: []string{v}}
+		}
 	}
 	var ids []string
 	for _, k := range []string{"CODEX_THREAD_ID", "CODEX_SESSION_ID"} {

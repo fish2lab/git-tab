@@ -55,6 +55,7 @@ func newWorld(t *testing.T) *world {
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(k, "GIT_") || strings.HasPrefix(k, "CLAUDE") || strings.HasPrefix(k, "CODEX") ||
+			strings.HasPrefix(k, "PI_") || strings.HasPrefix(k, "OPENCODE") || strings.HasPrefix(k, "DSH_") ||
 			k == "HOME" || k == "XDG_CONFIG_HOME" || k == "XDG_CACHE_HOME" || k == "PATH" {
 			continue
 		}
