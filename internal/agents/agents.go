@@ -141,7 +141,8 @@ func recentFiles(root string, since time.Time, keep func(path string) bool) []st
 }
 
 // eachLine calls fn with every line of a log, of any length, decompressing a
-// .zst file on the way. The slice is only valid during the call.
+// .zst (Codex) or .zstd (DeepSeek Harness) file on the way. The slice is
+// only valid during the call.
 func eachLine(path string, fn func(line []byte)) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -149,7 +150,8 @@ func eachLine(path string, fn func(line []byte)) error {
 	}
 	defer f.Close()
 	var r io.Reader = f
-	if strings.HasSuffix(path, ".zst") {
+	packed := strings.HasSuffix(path, ".zst") || strings.HasSuffix(path, ".zstd")
+	if packed {
 		z, err := zstd.NewReader(f, zstd.WithDecoderConcurrency(1))
 		if err != nil {
 			return err
@@ -177,8 +179,8 @@ func eachLine(path string, fn func(line []byte)) error {
 			return nil
 		}
 		if err != nil {
-			// A truncated .zst frame is a log still being written.
-			if strings.HasSuffix(path, ".zst") {
+			// A truncated frame is a log still being written.
+			if packed {
 				return nil
 			}
 			return err
