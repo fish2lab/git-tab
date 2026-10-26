@@ -44,7 +44,11 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 # Run from a checkout: build it. Piped from curl: a release binary, else go install.
-here=$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)
+# Piped into sh, $0 is the shell's name and says nothing about the current directory.
+here=
+case $0 in
+*install.sh) here=$(cd "$(dirname "$0")" 2>/dev/null && pwd || true) ;;
+esac
 if [ -n "$here" ] && grep -qs "^module github.com/$repo\$" "$here/go.mod"; then
 	command -v go >/dev/null 2>&1 || die "building from source needs Go: https://go.dev/dl"
 	say "building from $here"
