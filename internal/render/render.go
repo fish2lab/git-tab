@@ -74,6 +74,13 @@ func ParseSnacks(s string) []Snack {
 // USD formats a dollar amount with the precision a receipt needs.
 func USD(c float64) string {
 	switch {
+	case c >= 1000:
+		s := fmt.Sprintf("%.2f", c)
+		i := strings.IndexByte(s, '.')
+		for j := i - 3; j > 0; j -= 3 {
+			s = s[:j] + "," + s[j:]
+		}
+		return "$" + s
 	case c >= 1 || c == 0:
 		return fmt.Sprintf("$%.2f", c)
 	case c >= 0.01:
@@ -160,17 +167,13 @@ func paidValue(b *bill.Bill) string {
 	return v
 }
 
-// percent formats a share: 6%, 0.4%, 120%.
+// percent formats a share: 94%, 6.25%, 0.4%.
 func percent(f float64) string {
 	p := f * 100
-	switch {
-	case p >= 10 || p == 0:
+	if p >= 10 || p == 0 {
 		return fmt.Sprintf("%.0f%%", p)
-	case p >= 1:
-		return strings.TrimSuffix(fmt.Sprintf("%.1f", p), ".0") + "%"
-	default:
-		return strings.TrimSuffix(fmt.Sprintf("%.2f", p), "0") + "%"
 	}
+	return strconv.FormatFloat(p, 'g', 3, 64) + "%"
 }
 
 func oneLine(b *bill.Bill) string {

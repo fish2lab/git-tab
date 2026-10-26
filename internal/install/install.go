@@ -231,6 +231,10 @@ func Uninstall(dir string, purge bool) []string {
 		}
 	}
 	if purge {
+		// The snacks install set for a Chinese locale; ones you chose stay.
+		if v, err := gitx.Run(dir, "config", "--global", "tab.snacks"); err == nil && strings.TrimSpace(v) == render.ChineseSnacks {
+			gitx.Run(dir, "config", "--global", "--unset", "tab.snacks")
+		}
 		if err := os.RemoveAll(filepath.Dir(price.CachePath())); err == nil {
 			did = append(did, "deleted the price cache")
 		}

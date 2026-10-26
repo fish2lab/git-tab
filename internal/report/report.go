@@ -3,6 +3,7 @@
 package report
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -47,9 +48,9 @@ type History struct {
 }
 
 var (
-	costRe   = regexp.MustCompile(`^\$(\d+(?:\.\d+)?)`)
+	costRe   = regexp.MustCompile(`^\$([\d,]+(?:\.\d+)?)`)
 	tokenRe  = regexp.MustCompile(`(in|cached|written|out)=([\d.]+)([kM]?)`)
-	modelRe  = regexp.MustCompile(`^(.+?)(?: \$(\d+(?:\.\d+)?)| \(unpriced\))?$`)
+	modelRe  = regexp.MustCompile(`^(.+?)(?: \$([\d,]+(?:\.\d+)?)| \(unpriced\))?$`)
 	turnsRe  = regexp.MustCompile(`^(\d+) turns?$`)
 	extraRe  = regexp.MustCompile(` \+\d+$`)
 	fieldSep = "\x1f"
@@ -59,16 +60,22 @@ var (
 // none are given).
 func Load(dir string, revs []string) (*History, error) {
 	format := "--format=%H%x1f%ct%x1f%s%x1f%(trailers:key=AI-Cost,key=AI-Cost-Paid,key=AI-Tokens,key=AI-Model,key=AI-Agent,key=AI-Turns,unfold,separator=%x1d)%x1e"
+	top, err := gitx.Run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, errors.New("not in a git work tree")
+	}
+	h := &History{Repo: filepath.Base(top)}
 	args := append([]string{"log", format}, revs...)
 	if len(revs) == 0 {
+		if _, err := gitx.Run(dir, "rev-parse", "--verify", "-q", "HEAD"); err != nil {
+			return h, nil // no commits yet
+		}
 		args = append(args, "HEAD")
 	}
 	out, err := gitx.Run(dir, args...)
 	if err != nil {
 		return nil, err
 	}
-	top, _ := gitx.Run(dir, "rev-parse", "--show-toplevel")
-	h := &History{Repo: filepath.Base(top)}
 	for _, rec := range strings.Split(out, "\x1e") {
 		rec = strings.TrimLeft(rec, "\n")
 		f := strings.Split(rec, fieldSep)
@@ -101,13 +108,13 @@ func parse(f []string) (Entry, bool) {
 			found = true
 			parts := strings.Split(v, " · ")
 			if m := costRe.FindStringSubmatch(parts[0]); m != nil {
-				e.Cost, _ = strconv.ParseFloat(m[1], 64)
+				e.Cost, _ = dollars(m[1])
 				e.Priced = true
 			}
 			for _, p := range parts[1:] {
 				if paid, ok := strings.CutPrefix(p, "paid "); ok {
 					if m := costRe.FindStringSubmatch(paid); m != nil {
-						e.Paid, _ = strconv.ParseFloat(m[1], 64)
+						e.Paid, _ = dollars(m[1])
 						e.Planned = true
 					}
 				} else if m := turnsRe.FindStringSubmatch(p); m != nil {
@@ -118,7 +125,7 @@ func parse(f []string) (Entry, bool) {
 			}
 		case "AI-Cost-Paid":
 			if m := costRe.FindStringSubmatch(v); m != nil {
-				e.Paid, _ = strconv.ParseFloat(m[1], 64)
+				e.Paid, _ = dollars(m[1])
 				e.Planned = true
 			}
 		case "AI-Tokens":
@@ -141,7 +148,7 @@ func parse(f []string) (Entry, bool) {
 				if m := modelRe.FindStringSubmatch(part); m != nil {
 					s := Share{Model: m[1], Cost: math.NaN()}
 					if m[2] != "" {
-						s.Cost, _ = strconv.ParseFloat(m[2], 64)
+						s.Cost, _ = dollars(m[2])
 					} else if strings.HasSuffix(part, "(unpriced)") {
 						s.Cost = 0
 					}
@@ -172,6 +179,11 @@ func parse(f []string) (Entry, bool) {
 		}
 	}
 	return e, found
+}
+
+// dollars reads an amount as receipts print it: 0.060, 12.89, 1,234.56.
+func dollars(s string) (float64, error) {
+	return strconv.ParseFloat(strings.ReplaceAll(s, ",", ""), 64)
 }
 
 func tokens(num, unit string) int64 {

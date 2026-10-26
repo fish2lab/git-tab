@@ -39,6 +39,12 @@ git commit
 1. **精确**：commit 由 agent 发起时，环境里有 `CLAUDE_CODE_SESSION_ID`（Claude Code 2.1.308 会传给 Bash 子进程，本机实测）或 `CODEX_THREAD_ID` / `CODEX_SESSION_ID`（[codex-rs `shell_environment.rs`](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/shell_environment.rs)）。只结算这个 session（含其子代理），只推进它自己的 mark。其他并发 session 的用量留给下一次 commit。
 2. **按仓库**：人手动 commit，没有 session 环境变量。结算所有 cwd 在本仓库的 session，`base` 推到现在。
 
+跨机器：账本只在本机，小票随 commit 走。每张小票用 `AI-Session: agent/会话 id 末 8 位` 写明结算了哪些会话。stamp 时读一遍 lookback 窗口内的 `git log`，凡是不在本机账本里的 commit（别的机器、云端容器打的戳）所点名的会话，把它在那个 commit 作者时间之前的用量视为已结算。这样 `claude --teleport` 把云端对话拉回本地、或者 instabox 之类工具把对话搬到另一台机器时，同一段用量不会记两次（`TestTwoMachines` 覆盖）。用作者时间是因为 rebase 会改提交时间、不改作者时间。
+
+实付：`tab-plan.<名>.*`（全局 git config，或云端用的 `GIT_TAB_PLANS` 环境变量）登记「什么由谁付、按什么比例」。按 agent/路由 → agent/厂商 → 路由 → 厂商 → agent 的顺序匹配；厂商排在单独的 agent 前面，是因为经 magpie 之类网关把 Claude Code 转给 DeepSeek 时，这部分不该算进 Claude Max。订阅的比例 = 月费 ÷ 一个月用量的 API 价：用户自报 `--worth` 优先，没有就从本机 30 天日志测，日志不足 30 天按比例放大，每周在后台重测一次。本机日志看不到 claude.ai 网页端和其他设备上的用量，所以自报通常更准。
+
+累计账单：receipt 模板最后一行是当前分支历史里所有小票之和，从 `git log` 的 trailer 里加，所以别的机器、队友的 commit 也算在内。结果按 HEAD 缓存在账本里，下一个 commit 直接在缓存上加一笔，不用重新遍历历史（本机最大的仓库 2472 个 commit，遍历一次约 60ms）。
+
 amend：账本记着每个 commit 结算前的状态。amend 时回滚到被改那个 commit 之前的状态重新算，所以 amend 后的小票是累计值，旧块会被剥掉换成新块。`--amend -m` 时 git 给的 source 是 `message`，靠读父进程命令行里的 `--amend` 识别。
 
 ## 取舍
@@ -52,7 +58,11 @@ amend：账本记着每个 commit 结算前的状态。amend 时回滚到被改�
 | 成本标 `(api-equiv)` | 订阅用户不按 token 付费，数字是"按公开 API 价折算"，trailer 里明说 |
 | 价格在 commit 当时定死 | 小票的意义就是当时的价；以后调价不回改历史 |
 | 价格表：内嵌 models.dev 快照，`git tab prices update` 刷新到本机缓存；缓存超过 7 天时 post-commit 在后台静默刷新（`tab.autoUpdatePrices=false` 关闭） | hook 本身从不联网，联网只在后台子进程里，失败无感 |
-| 默认模板 standard | minimal 一行不带版本号行，靠 `(api-equiv)` 标记识别为 schema 1；以后改格式必须写 `AI-Cost-Schema: 2` |
+| 默认模板 receipt（小票 ASCII 框 + 标准 trailer） | 一眼能看出是小票，代价是 commit message 多 20 多行；嫌长可以 `tab.template standard` 只留 trailer。minimal 一行不带版本号行，靠 `(api-equiv)` 标记识别为 schema 1；以后改格式必须写 `AI-Cost-Schema: 2` |
+| 订阅折扣用「月费 ÷ 月用量 API 价」一个比例 | 简单、可解释、和用户心算一致；代价是忽略了订阅的 5 小时窗口和周上限，用量越多比例越低 |
+| `AI-Session` 只写会话 id 末 8 位 | 公开仓库里不暴露完整会话 id；8 位十六进制随机部分足够在一个仓库内区分会话 |
+| 云端靠仓库 `.claude/settings.json` 的 SessionStart 钩子安装 | Claude Code 云端会话不加载插件、只跑仓库里提交的钩子（[官方文档](https://code.claude.com/docs/en/cloud-environments)）；代价是要把这个钩子提交进仓库 |
+| 不做 magpie 插件 | magpie 的插件（provider/middleware/routing/tools/page/agent）都碰不到 git；能做的是读它的数据，宣传走它的 Discord |
 | merge、squash、rebase 不打戳；cherry-pick/revert 只剥旧块 | 这些 commit 的消息由 git 拼出来，用量不属于它们；没结算的用量留给下一个普通 commit |
 | fast 模式按 2 倍计价 | Opus 5 / 5.5 官方价就是 2 倍；Opus 4.8 的 fast 价没查到，同样按 2 倍算（推断） |
 | 用量查找窗口最多回看 30 天（`tab.lookback`） | 老仓库第一次 commit 不会扫出几个月的用量 |
@@ -67,6 +77,8 @@ amend：账本记着每个 commit 结算前的状态。amend 时回滚到被改�
 - GitHub 网页上的 squash merge 不走本地 hook，被 squash 掉的分支 commit 的小票不会进主干历史。
 - 子代理按父 session 归因；Claude Code 的 `<synthetic>` 消息和 API 报错消息不计费。
 - 同一个线程先后在两个 worktree 里干活时，mark 按线程记，先提交的那个 worktree 会把这条线程在另一个 worktree 里更早的用量一并结算掉。
+- DeepSeek 高峰时段按北京时间工作日 9–12、14–18 点双倍算，不认中国法定节假日和调休。
+- Claude Code 经网关转发给别家模型时，按它日志里写的模型名计价。
 - 只有最近一个 commit 能 amend 出累计小票；`reset` 回去再 amend 更早的 commit，小票只算上次结算之后的用量。
 
 ## 工作包和依赖
@@ -76,7 +88,7 @@ agents (session 解析，adapter 注册表) ──┐
 price  (models.dev 价格表，逐请求计价) ─┼─> bill (按窗口过滤、汇总) ─> render (四种模板、消息落位)
 gitx   (git 调用)  ──┬─> ledger (结算账本) ┘                              │
                      └──────────────────────> stamp (三个 hook 的编排) <──┘
-install (装卸 hook) / report (summary、receipt、badge) / cli (子命令分发)
+install (装卸 hook) / report (summary、receipt、badge、累计账单) / plan (订阅与实付) / cli (子命令分发)
 ```
 
 | 包 | 接口 | 验收 |
